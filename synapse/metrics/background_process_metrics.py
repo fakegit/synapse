@@ -24,7 +24,10 @@ from prometheus_client.core import REGISTRY, Counter, Gauge
 from twisted.internet import defer
 
 from synapse.logging.context import LoggingContext, PreserveLoggingContext
-from synapse.logging.opentracing import start_active_span
+from synapse.logging.opentracing import (
+    get_active_span_context,
+    start_active_span_follows_from,
+)
 
 if TYPE_CHECKING:
     import resource
@@ -188,6 +191,8 @@ def run_as_background_process(desc, func, *args, **kwargs):
         follow the synapse logcontext rules.
     """
 
+    previous_span_context = get_active_span_context()
+
     @defer.inlineCallbacks
     def run():
         with _bg_metrics_lock:
@@ -197,7 +202,7 @@ def run_as_background_process(desc, func, *args, **kwargs):
         _background_process_start_count.labels(desc).inc()
         _background_process_in_flight_count.labels(desc).inc()
 
-        with BackgroundProcessLoggingContext(desc) as context:
+        with BackgroundProcessLoggingContext(desc, previous_span_context) as context:
             context.request = "%s-%i" % (desc, count)
 
             try:
@@ -243,13 +248,14 @@ class BackgroundProcessLoggingContext(LoggingContext):
     processes.
     """
 
-    __slots__ = ["_proc", "_span"]
+    __slots__ = ["_proc", "_span", "_previous_spans"]
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, previous_span_context):
         super().__init__(name)
 
         self._proc = _BackgroundProcess(name, self)
         self._span = None
+        self._previous_spans = [previous_span_context] if previous_span_context else []
 
     def start(self, rusage: "Optional[resource._RUsage]"):
         """Log context has started running (again).
@@ -266,7 +272,7 @@ class BackgroundProcessLoggingContext(LoggingContext):
     def __enter__(self) -> LoggingContext:
         context = super().__enter__()
 
-        self._span = start_active_span(self.name)
+        self._span = start_active_span_follows_from(self.name, self._previous_spans)
         self._span.__enter__()
 
         return context

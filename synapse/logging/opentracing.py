@@ -527,6 +527,8 @@ def start_active_span_from_edu(
 
 
 def get_active_span_context():
+    """Gets the active span's context, if any.
+    """
     if not opentracing:
         return None
 
