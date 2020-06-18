@@ -249,7 +249,7 @@ class BackgroundProcessLoggingContext(LoggingContext):
         super().__init__(name)
 
         self._proc = _BackgroundProcess(name, self)
-        self._span = start_active_span(name)
+        self._span = None
 
     def start(self, rusage: "Optional[resource._RUsage]"):
         """Log context has started running (again).
@@ -266,6 +266,7 @@ class BackgroundProcessLoggingContext(LoggingContext):
     def __enter__(self) -> LoggingContext:
         context = super().__enter__()
 
+        self._span = start_active_span(self.name)
         self._span.__enter__()
 
         return context
