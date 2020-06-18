@@ -28,6 +28,10 @@ from synapse.api.constants import EventTypes, Membership
 from synapse.events import FrozenEvent
 from synapse.events.snapshot import EventContext
 from synapse.logging.context import PreserveLoggingContext, make_deferred_yieldable
+from synapse.logging.opentracing import (
+    get_active_span_context,
+    start_active_span_follows_from,
+)
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.state import StateResolutionStore
 from synapse.storage.data_stores import DataStores
@@ -76,7 +80,8 @@ class _EventPeristenceQueue(object):
     """
 
     _EventPersistQueueItem = namedtuple(
-        "_EventPersistQueueItem", ("events_and_contexts", "backfilled", "deferred")
+        "_EventPersistQueueItem",
+        ("events_and_contexts", "backfilled", "deferred", "contexts"),
     )
 
     def __init__(self):
@@ -106,6 +111,7 @@ class _EventPeristenceQueue(object):
             end_item = queue[-1]
             if end_item.backfilled == backfilled:
                 end_item.events_and_contexts.extend(events_and_contexts)
+                end_item.contexts.append(get_active_span_context())
                 return end_item.deferred.observe()
 
         deferred = ObservableDeferred(defer.Deferred(), consumeErrors=True)
@@ -115,6 +121,7 @@ class _EventPeristenceQueue(object):
                 events_and_contexts=events_and_contexts,
                 backfilled=backfilled,
                 deferred=deferred,
+                contexts=[get_active_span_context()],
             )
         )
 
@@ -146,7 +153,10 @@ class _EventPeristenceQueue(object):
                 queue = self._get_drainining_queue(room_id)
                 for item in queue:
                     try:
-                        ret = await per_item_callback(item)
+                        with start_active_span_follows_from(
+                            "persist_queue", item.contexts,
+                        ):
+                            ret = await per_item_callback(item)
                     except Exception:
                         with PreserveLoggingContext():
                             item.deferred.errback()
