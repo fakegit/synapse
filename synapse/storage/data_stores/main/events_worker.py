@@ -1389,13 +1389,15 @@ class EventsWorkerStore(SQLBaseStore):
         else:
             # If there's no read receipt for that room, it probably means the user hasn't
             # opened it yet, in which case use the stream ID of their join event.
+            # We can't just set it to 0 otherwise messages from other local users from
+            # before this user joined will be counted as well.
             txn.execute(
                 """
                 SELECT stream_ordering FROM room_memberships
                 LEFT JOIN events USING (event_id, room_id)
                 WHERE membership = 'join'
-                    AND room_id = ?
                     AND user_id = ?
+                    AND room_id = ?
                 """, (user_id, room_id)
             )
             row = txn.fetchone()
